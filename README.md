@@ -24,13 +24,13 @@ Walking is modeled with longer, overlapping stance phases. Running has shorter s
 
 We use dimensionless stiffness `kappa = kL/(mg)` and damping ratio `zeta = c/(2 sqrt(k m_eff))` to compare settings. The current model uses `m = 10.66 kg`, `L = 0.74 m`, and `m_eff = m/2` as initial assumptions. These can be changed in `gait_sim.py` if the team chooses different model values.
 
-## What we measure
+## What we're measuring
 
 The simulation records actuator work, cost of transport, spring energy and return, damping loss, speed error, center-of-mass height, foot support and flight time, and a basic stability flag.
 
 These measures let us compare settings within the simulation. They should not be treated as proof of how a physical robot would perform.
 
-## Run the simulation
+## Running the simulation
 
 ```bash
 python -m venv .venv
