@@ -5,13 +5,21 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import csv
 import math
+import time
 import xml.etree.ElementTree as ET
 
 import mujoco
+from mujoco import viewer
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 MODEL_XML = ROOT / "biped.xml"
+PASSIVE_JOINT_SPRINGS = {
+    "knee_L": (60.0, 2.5),
+    "knee_R": (60.0, 2.5),
+    "ankle_L": (8.0, 0.5),
+    "ankle_R": (8.0, 0.5),
+}
 
 @dataclass(frozen=True)
 class GaitConfig:
@@ -104,14 +112,16 @@ def _id(model, object_type, name):
         raise ValueError(f"Missing MuJoCo object: {name}")
     return value
 
-def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path | None = None):
+def run_simulation(gait: GaitConfig, params: SpringParameters,
+                   output_csv: Path | None = None, visualize: bool = False):
     model, k, c = make_model(params)
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
     mujoco.mj_forward(model, data)
 
     jids = {n: _id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in
-            ("root_x", "root_z", "root_pitch", "hip_L", "hip_R", "spring_L", "spring_R")}
+            ("root_x", "root_z", "root_pitch", "hip_L", "hip_R", "spring_L", "spring_R",
+             "knee_L", "knee_R", "ankle_L", "ankle_R")}
     qadr = {n: model.jnt_qposadr[j] for n, j in jids.items()}
     dadr = {n: model.jnt_dofadr[j] for n, j in jids.items()}
     aids = {n: _id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in
@@ -132,6 +142,12 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
     spring_released = 0.0
     damping_loss = 0.0
     previous_spring_energy = 0.0
+    joint_spring_loaded = 0.0
+    joint_spring_released = 0.0
+    joint_damping_loss = 0.0
+    previous_joint_spring_energy = 0.0
+    max_knee_angle = 0.0
+    max_ankle_angle = 0.0
     rows = []
     stable = True
     max_height_error = 0.0
@@ -163,6 +179,14 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
         model.site_pos[anchor_site[side], :] = (
             foot_target_x[side], 0.075 if side == "L" else -0.075, 0.07)
     mujoco.mj_forward(model, data)
+
+    sim_viewer = viewer.launch_passive(model, data) if visualize else None
+    render_period = 0.02  # approximately 50 rendered frames per second
+    next_render_time = time.perf_counter()
+    if sim_viewer is not None:
+        sim_viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+        sim_viewer.cam.trackbodyid = trunk_id
+        sim_viewer.cam.distance = 2.5
 
     for step in range(nsteps):
         t = step * dt
@@ -241,7 +265,33 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
         previous_spring_energy = spring_energy
         damping_loss += c * (vL*vL + vR*vR) * dt
 
+        # Track passive torsional spring storage and damping in the knees/ankles.
+        joint_spring_energy = 0.0
+        for joint_name, (joint_stiffness, joint_damping) in PASSIVE_JOINT_SPRINGS.items():
+            q = data.qpos[qadr[joint_name]]
+            qd = data.qvel[dadr[joint_name]]
+            joint_spring_energy += 0.5 * joint_stiffness * q * q
+            joint_damping_loss += joint_damping * qd * qd * dt
+            if joint_name.startswith("knee_"):
+                max_knee_angle = max(max_knee_angle, abs(q))
+            else:
+                max_ankle_angle = max(max_ankle_angle, abs(q))
+        joint_energy_change = joint_spring_energy - previous_joint_spring_energy
+        joint_spring_loaded += max(0.0, joint_energy_change)
+        joint_spring_released += max(0.0, -joint_energy_change)
+        previous_joint_spring_energy = joint_spring_energy
+
         mujoco.mj_step(model, data)
+        if sim_viewer is not None and step % 10 == 0:
+            if not sim_viewer.is_running():
+                break
+            sim_viewer.sync()
+            next_render_time += render_period
+            delay = next_render_time - time.perf_counter()
+            if delay > 0.0:
+                time.sleep(delay)
+            else:
+                next_render_time = time.perf_counter()
         torso_z = data.xpos[trunk_id, 2]
         pitch = data.qpos[qadr["root_pitch"]]
         vx = data.qvel[dadr["root_x"]]
@@ -269,7 +319,17 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
         # Save at 50 Hz, enough for plotting and report figures.
         if step % 10 == 0:
             rows.append((t, data.qpos[qadr["root_x"]], torso_z, vx, pitch,
-                         qL, qR, spring_energy, drive))
+                         qL, qR, spring_energy, joint_spring_energy,
+                         data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
+                         data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive))
+
+    # Keep the final pose visible until the user closes the viewer window.
+    if sim_viewer is not None:
+        if sim_viewer.is_running():
+            sim_viewer.sync()
+            while sim_viewer.is_running():
+                time.sleep(0.02)
+        sim_viewer.close()
 
     elapsed = data.time
     distance = max(0.0, data.qpos[qadr["root_x"]] - start_x)
@@ -286,13 +346,27 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
         "damping_ratio": params.damping_ratio,
         "spring_stiffness_N_m": k,
         "spring_damping_Ns_m": c,
+        "knee_spring_stiffness_Nm_rad": 60.0,
+        "knee_spring_damping_Nms_rad": 2.5,
+        "ankle_spring_stiffness_Nm_rad": 8.0,
+        "ankle_spring_damping_Nms_rad": 0.5,
         "positive_actuator_work_J": positive_work,
         "negative_actuator_work_J": negative_work,
         "cost_of_transport": cost_of_transport,
         "spring_energy_loaded_J": spring_loaded,
         "spring_energy_released_J": spring_released,
+        "joint_spring_energy_loaded_J": joint_spring_loaded,
+        "joint_spring_energy_released_J": joint_spring_released,
+        "total_spring_energy_loaded_J": spring_loaded + joint_spring_loaded,
+        "total_spring_energy_released_J": spring_released + joint_spring_released,
         "spring_return_ratio": return_fraction,
+        "total_spring_return_ratio": (spring_released + joint_spring_released) /
+                                     max(spring_loaded + joint_spring_loaded, 1e-9),
         "damper_dissipation_J": damping_loss,
+        "joint_damper_dissipation_J": joint_damping_loss,
+        "total_damper_dissipation_J": damping_loss + joint_damping_loss,
+        "max_abs_knee_angle_rad": max_knee_angle,
+        "max_abs_ankle_angle_rad": max_ankle_angle,
         "max_com_height_deviation_m": max_height_error,
         "max_spring_deflection_m": max_spring_deflection,
         "rms_speed_error_m_s": math.sqrt(speed_sq_error / max(1, speed_error_samples)),
@@ -308,7 +382,10 @@ def run_simulation(gait: GaitConfig, params: SpringParameters, output_csv: Path 
             writer = csv.writer(f)
             writer.writerow(("time_s", "x_m", "com_height_m", "speed_m_s", "pitch_rad",
                              "left_spring_deflection_m", "right_spring_deflection_m",
-                             "elastic_energy_J", "drive_force_N"))
+                             "leg_elastic_energy_J", "joint_elastic_energy_J",
+                             "left_knee_angle_rad", "right_knee_angle_rad",
+                             "left_ankle_angle_rad", "right_ankle_angle_rad",
+                             "drive_force_N"))
             writer.writerows(rows)
     return result
 
@@ -319,3 +396,4 @@ def result_to_csv(results, path: Path):
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
+
