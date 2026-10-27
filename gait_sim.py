@@ -21,7 +21,6 @@ PASSIVE_JOINT_SPRINGS = {
     "ankle_R": (8.0, 0.5),
 }
 
-
 @dataclass(frozen=True)
 class GaitConfig:
     name: str
@@ -49,38 +48,32 @@ class GaitConfig:
     def period(self) -> float:
         return self.stride_length / self.speed
 
-
 GAITS = {
     # Alternating support with an overlap; a compliant extension is added to the
     # inverted-pendulum-like walking baseline for the project comparison.
     "walk": GaitConfig("walk", speed=0.85, stride_length=0.72, duty_factor=0.62),
     # Shorter stance fraction creates an aerial interval and SLIP-like rebound.
     "run": GaitConfig(
-        "run",
-        speed=2.0,
-        stride_length=1.05,
-        duty_factor=0.60,
-        drive_kp=150.0,
-        drive_ki=50.0,
-    ),
+    "run",
+    speed=2.0,
+    stride_length=1.05,
+    duty_factor=0.60,
+    drive_kp=150.0,
+    drive_ki=50.0,
+),
 }
-
 
 @dataclass(frozen=True)
 class SpringParameters:
     dimensionless_stiffness: float = 15.0  # k L / (m g)
     damping_ratio: float = 0.20
 
-
-def physical_spring_parameters(
-    params: SpringParameters, mass: float, leg_length: float
-):
+def physical_spring_parameters(params: SpringParameters, mass: float, leg_length: float):
     """Convert kappa=kL/(mg), zeta=c/(2 sqrt(k m_eff)) to SI values."""
     k = params.dimensionless_stiffness * mass * 9.81 / leg_length
     effective_mass_per_leg = mass / 2.0
     c = 2.0 * params.damping_ratio * math.sqrt(k * effective_mass_per_leg)
     return k, c
-
 
 def make_model(params: SpringParameters):
     """Load the MJCF and insert the candidate spring and damper values."""
@@ -95,11 +88,9 @@ def make_model(params: SpringParameters):
     xml = ET.tostring(root, encoding="unicode")
     return mujoco.MjModel.from_xml_string(xml), k, c
 
-
 def smoothstep(x: float) -> float:
     x = min(1.0, max(0.0, x))
     return x * x * (3.0 - 2.0 * x)
-
 
 def hip_reference(t: float, gait: GaitConfig, leg_offset: float) -> float:
     phase = ((t / gait.period) + leg_offset) % 1.0
@@ -112,22 +103,18 @@ def hip_reference(t: float, gait: GaitConfig, leg_offset: float) -> float:
     u = (phase - d) / (1.0 - d)
     return a - 2.0 * a * smoothstep(u)
 
-
 def gait_phase(t: float, gait: GaitConfig, leg_offset: float) -> float:
     return ((t / gait.period) + leg_offset) % 1.0
 
-
-def running_knee_reference(
-    phase: float, duty_factor: float, peak_flexion: float = 0.9
-) -> float:
+def running_knee_reference(phase: float, duty_factor: float,
+                           peak_flexion: float = 0.9) -> float:
     """Bend the knee during swing, then extend it before the next touchdown."""
     if phase < duty_factor or duty_factor >= 1.0:
         return 0.0
     swing_phase = (phase - duty_factor) / (1.0 - duty_factor)
     if swing_phase < 0.5:
-        return peak_flexion * smoothstep(swing_phase / 0.5)
-    return peak_flexion * (1.0 - smoothstep((swing_phase - 0.5) / 0.5))
-
+        return -peak_flexion * smoothstep(swing_phase / 0.5)
+    return -peak_flexion * (1.0 - smoothstep((swing_phase - 0.5) / 0.5))
 
 def _id(model, object_type, name):
     value = mujoco.mj_name2id(model, object_type, name)
@@ -135,35 +122,22 @@ def _id(model, object_type, name):
         raise ValueError(f"Missing MuJoCo object: {name}")
     return value
 
-
-def run_simulation(
-    gait: GaitConfig,
-    params: SpringParameters,
-    output_csv: Path | None = None,
-    visualize: bool = False,
-):
+def run_simulation(gait: GaitConfig, params: SpringParameters,
+                   output_csv: Path | None = None, visualize: bool = False):
     model, k, c = make_model(params)
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
     mujoco.mj_forward(model, data)
 
-    jids = {
-        n: _id(model, mujoco.mjtObj.mjOBJ_JOINT, n)
-        for n in (
-            "root_x", "root_z", "root_pitch", "hip_L", "hip_R",
-            "spring_L", "spring_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
-        )
-    }
+    jids = {n: _id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in
+            ("root_x", "root_z", "root_pitch", "hip_L", "hip_R", "spring_L", "spring_R",
+             "knee_L", "knee_R", "ankle_L", "ankle_R")}
     qadr = {n: model.jnt_qposadr[j] for n, j in jids.items()}
     dadr = {n: model.jnt_dofadr[j] for n, j in jids.items()}
-    aids = {
-        n: _id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, n)
-        for n in (
-            "drive", "vertical_support", "pitch_stabilizer",
-            "hip_motor_L", "hip_motor_R", "knee_motor_L", "knee_motor_R",
-            "spring_reset_L", "spring_reset_R",
-        )
-    }
+    aids = {n: _id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in
+            ("drive", "vertical_support", "pitch_stabilizer", "hip_motor_L", "hip_motor_R",
+             "knee_motor_L", "knee_motor_R",
+             "spring_reset_L", "spring_reset_R")}
 
     # Begin with the feet near contact and the trunk at its nominal height.
     data.qpos[qadr["root_z"]] = 0.0  # torso body has a 0.82 m worldbody offset
@@ -195,36 +169,26 @@ def run_simulation(
     double_support_steps = 0
     flight_steps = 0
     start_x = data.qpos[qadr["root_x"]]
+    start_t = 0.0
     drive_integral = 0.0
     floor_geom = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
-    foot_geoms = {
-        _id(model, mujoco.mjtObj.mjOBJ_GEOM, "foot_L"),
-        _id(model, mujoco.mjtObj.mjOBJ_GEOM, "foot_R"),
-    }
-    foot_geom_by_side = {
-        side: _id(model, mujoco.mjtObj.mjOBJ_GEOM, f"foot_{side}")
-        for side in ("L", "R")
-    }
-    anchor_site = {
-        side: _id(model, mujoco.mjtObj.mjOBJ_SITE, f"anchor_{side}")
-        for side in ("L", "R")
-    }
-    stance_eq = {
-        side: _id(model, mujoco.mjtObj.mjOBJ_EQUALITY, f"stance_{side}")
-        for side in ("L", "R")
-    }
+    foot_geoms = {_id(model, mujoco.mjtObj.mjOBJ_GEOM, "foot_L"),
+                  _id(model, mujoco.mjtObj.mjOBJ_GEOM, "foot_R")}
+    foot_geom_by_side = {side: _id(model, mujoco.mjtObj.mjOBJ_GEOM, f"foot_{side}")
+                         for side in ("L", "R")}
+    anchor_site = {side: _id(model, mujoco.mjtObj.mjOBJ_SITE, f"anchor_{side}")
+                   for side in ("L", "R")}
+    stance_eq = {side: _id(model, mujoco.mjtObj.mjOBJ_EQUALITY, f"stance_{side}")
+                 for side in ("L", "R")}
     trunk_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-    foot_target_x = {
-        side: float(data.geom_xpos[geom, 0])
-        for side, geom in foot_geom_by_side.items()
-    }
+    foot_target_x = {side: float(data.geom_xpos[geom, 0])
+                     for side, geom in foot_geom_by_side.items()}
     previous_phase = {"L": 0.0, "R": 0.5}
     for side, offset in (("L", 0.0), ("R", 0.5)):
         phase0 = gait_phase(0.0, gait, offset)
         data.eq_active[stance_eq[side]] = int(phase0 < gait.duty_factor)
         model.site_pos[anchor_site[side], :] = (
-            foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04
-        )
+            foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04)
     mujoco.mj_forward(model, data)
 
     sim_viewer = viewer.launch_passive(model, data) if visualize else None
@@ -240,80 +204,55 @@ def run_simulation(
         vx = data.qvel[dadr["root_x"]]
         speed_error = gait.speed - vx
         drive_integral = float(np.clip(drive_integral + speed_error * dt, -5.0, 5.0))
-        drive = np.clip(
-            gait.drive_kp * speed_error + gait.drive_ki * drive_integral,
-            -gait.drive_force_limit,
-            gait.drive_force_limit,
-        )
+        drive = np.clip(gait.drive_kp * speed_error + gait.drive_ki * drive_integral,
+                        -gait.drive_force_limit, gait.drive_force_limit)
         data.ctrl[aids["drive"]] = drive
-
         root_z = data.qpos[qadr["root_z"]]
         root_z_rate = data.qvel[dadr["root_z"]]
-        zref = gait.height_amplitude * (
-            1.0 - math.cos(2.0 * math.pi * t / gait.period)
-        )
+        zref = gait.height_amplitude * (1.0 - math.cos(2.0 * math.pi * t / gait.period))
         data.ctrl[aids["vertical_support"]] = np.clip(
-            gait.support_fraction * 10.66 * 9.81
-            + gait.height_kp * (zref - root_z)
-            - gait.height_kd * root_z_rate,
-            -60.0,
-            240.0,
-        )
-
+            gait.support_fraction * 10.66 * 9.81 +
+            gait.height_kp * (zref - root_z) - gait.height_kd * root_z_rate,
+            -60.0, 240.0)
         pitch = data.qpos[qadr["root_pitch"]]
         pitch_rate = data.qvel[dadr["root_pitch"]]
         data.ctrl[aids["pitch_stabilizer"]] = np.clip(
-            -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate,
-            -120.0,
-            120.0,
-        )
-
+            -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate, -120.0, 120.0)
         torso_x = float(data.xpos[trunk_id, 0])
-        for side, offset, actuator in (
-            ("L", 0.0, "hip_motor_L"),
-            ("R", 0.5, "hip_motor_R"),
-        ):
+        for side, offset, actuator in (("L", 0.0, "hip_motor_L"), ("R", 0.5, "hip_motor_R")):
             joint = f"hip_{side}"
             q = data.qpos[qadr[joint]]
             qd = data.qvel[dadr[joint]]
             phase = gait_phase(t, gait, offset)
             if phase < previous_phase[side]:
                 # Touchdown: place the foot ahead of the torso and hold its
-                # world-frame target through stance to approximate no-slip support.
+                # world-frame target through stance to approximate no-slip
+                # support, as in reduced-order walking templates.
                 foot_target_x[side] = float(data.geom_xpos[foot_geom_by_side[side], 0])
                 model.site_pos[anchor_site[side], :] = (
-                    foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04
-                )
+                    foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04)
             previous_phase[side] = phase
             data.eq_active[stance_eq[side]] = int(phase < gait.duty_factor)
-
             if phase < gait.duty_factor:
                 leg_length = max(0.55, 0.74 + data.qpos[qadr[f"spring_{side}"]])
                 offset_x = np.clip(foot_target_x[side] - torso_x, -0.45, 0.45)
                 qref = -math.asin(float(offset_x / leg_length))
             else:
                 qref = hip_reference(t, gait, offset)
-
-            torque = np.clip(
-                gait.hip_kp * (qref - q) - gait.hip_kd * qd,
-                -30.0,
-                30.0,
-            )
+            torque = np.clip(gait.hip_kp * (qref - q) - gait.hip_kd * qd,
+                             -30.0, 30.0)
             data.ctrl[aids[actuator]] = torque
 
-            # In running, flex each knee during swing and extend it before touchdown.
-            # Walking leaves the knee motors inactive.
+            # For running, tuck each knee during swing and straighten it before
+            # touchdown. Walking leaves the new knee motors inactive.
             knee_name = f"knee_{side}"
             knee_motor = f"knee_motor_{side}"
             if gait.name == "run":
                 knee_ref = running_knee_reference(phase, gait.duty_factor)
                 knee_q = data.qpos[qadr[knee_name]]
                 knee_qd = data.qvel[dadr[knee_name]]
-                knee_torque = np.clip(
-                    130.0 * (knee_ref - knee_q) - 5.0 * knee_qd,
-                    -70.0,
-                    70.0,
-                )
+                knee_torque = np.clip(130.0 * (knee_ref - knee_q) - 5.0 * knee_qd,
+                                      -70.0, 70.0)
                 data.ctrl[aids[knee_motor]] = knee_torque
             else:
                 data.ctrl[aids[knee_motor]] = 0.0
@@ -325,27 +264,21 @@ def run_simulation(
                 vspring = data.qvel[dadr[spring_joint]]
                 retract_force = np.clip(
                     gait.swing_retract_kp * (gait.swing_retract - qspring)
-                    - gait.swing_retract_kd * vspring,
-                    -180.0,
-                    180.0,
-                )
+                    - gait.swing_retract_kd * vspring, -180.0, 180.0)
                 data.ctrl[aids[spring_motor]] = retract_force
             else:
                 data.ctrl[aids[spring_motor]] = 0.0
 
         # Motor work uses power=torque*joint speed; preserve positive and
         # negative work separately so regeneration assumptions remain explicit.
-        for act_name, joint_name in (
-            ("drive", "root_x"),
-            ("vertical_support", "root_z"),
-            ("pitch_stabilizer", "root_pitch"),
-            ("hip_motor_L", "hip_L"),
-            ("hip_motor_R", "hip_R"),
-            ("knee_motor_L", "knee_L"),
-            ("knee_motor_R", "knee_R"),
-            ("spring_reset_L", "spring_L"),
-            ("spring_reset_R", "spring_R"),
-        ):
+        for act_name, joint_name in (("drive", "root_x"), ("vertical_support", "root_z"),
+                                     ("pitch_stabilizer", "root_pitch"),
+                                     ("hip_motor_L", "hip_L"),
+                                     ("hip_motor_R", "hip_R"),
+                                     ("knee_motor_L", "knee_L"),
+                                     ("knee_motor_R", "knee_R"),
+                                     ("spring_reset_L", "spring_L"),
+                                     ("spring_reset_R", "spring_R")):
             power = data.ctrl[aids[act_name]] * data.qvel[dadr[joint_name]]
             positive_work += max(0.0, power) * dt
             negative_work += max(0.0, -power) * dt
@@ -353,12 +286,12 @@ def run_simulation(
         qL, qR = data.qpos[qadr["spring_L"]], data.qpos[qadr["spring_R"]]
         vL, vR = data.qvel[dadr["spring_L"]], data.qvel[dadr["spring_R"]]
         max_spring_deflection = max(max_spring_deflection, abs(qL), abs(qR))
-        spring_energy = 0.5 * k * (qL * qL + qR * qR)
+        spring_energy = 0.5 * k * (qL*qL + qR*qR)
         change = spring_energy - previous_spring_energy
         spring_loaded += max(0.0, change)
         spring_released += max(0.0, -change)
         previous_spring_energy = spring_energy
-        damping_loss += c * (vL * vL + vR * vR) * dt
+        damping_loss += c * (vL*vL + vR*vR) * dt
 
         # Track passive torsional spring storage and damping in the knees/ankles.
         joint_spring_energy = 0.0
@@ -387,7 +320,6 @@ def run_simulation(
                 time.sleep(delay)
             else:
                 next_render_time = time.perf_counter()
-
         torso_z = data.xpos[trunk_id, 2]
         pitch = data.qpos[qadr["root_pitch"]]
         vx = data.qvel[dadr["root_x"]]
@@ -395,7 +327,6 @@ def run_simulation(
         if t >= 1.0:  # exclude startup transient from steady-speed tracking metric
             speed_sq_error += (vx - gait.speed) ** 2
             speed_error_samples += 1
-
         contacting_feet = set()
         for ci in range(data.ncon):
             con = data.contact[ci]
@@ -409,32 +340,16 @@ def run_simulation(
             single_support_steps += 1
         else:
             double_support_steps += 1
-
         if (not np.isfinite(data.qpos).all() or torso_z < 0.40 or abs(pitch) > 0.9
                 or max_spring_deflection >= 0.195):
             stable = False
             break
-
         # Save at 50 Hz, enough for plotting and report figures.
         if step % 10 == 0:
-            rows.append(
-                (
-                    t,
-                    data.qpos[qadr["root_x"]],
-                    torso_z,
-                    vx,
-                    pitch,
-                    qL,
-                    qR,
-                    spring_energy,
-                    joint_spring_energy,
-                    data.qpos[qadr["knee_L"]],
-                    data.qpos[qadr["knee_R"]],
-                    data.qpos[qadr["ankle_L"]],
-                    data.qpos[qadr["ankle_R"]],
-                    drive,
-                )
-            )
+            rows.append((t, data.qpos[qadr["root_x"]], torso_z, vx, pitch,
+                         qL, qR, spring_energy, joint_spring_energy,
+                         data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
+                         data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive))
 
     # Keep the final pose visible until the user closes the viewer window.
     if sim_viewer is not None:
@@ -473,8 +388,8 @@ def run_simulation(
         "total_spring_energy_loaded_J": spring_loaded + joint_spring_loaded,
         "total_spring_energy_released_J": spring_released + joint_spring_released,
         "spring_return_ratio": return_fraction,
-        "total_spring_return_ratio": (spring_released + joint_spring_released)
-        / max(spring_loaded + joint_spring_loaded, 1e-9),
+        "total_spring_return_ratio": (spring_released + joint_spring_released) /
+                                     max(spring_loaded + joint_spring_loaded, 1e-9),
         "damper_dissipation_J": damping_loss,
         "joint_damper_dissipation_J": joint_damping_loss,
         "total_damper_dissipation_J": damping_loss + joint_damping_loss,
@@ -493,27 +408,14 @@ def run_simulation(
         output_csv.parent.mkdir(parents=True, exist_ok=True)
         with output_csv.open("w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(
-                (
-                    "time_s",
-                    "x_m",
-                    "com_height_m",
-                    "speed_m_s",
-                    "pitch_rad",
-                    "left_spring_deflection_m",
-                    "right_spring_deflection_m",
-                    "leg_elastic_energy_J",
-                    "joint_elastic_energy_J",
-                    "left_knee_angle_rad",
-                    "right_knee_angle_rad",
-                    "left_ankle_angle_rad",
-                    "right_ankle_angle_rad",
-                    "drive_force_N",
-                )
-            )
+            writer.writerow(("time_s", "x_m", "com_height_m", "speed_m_s", "pitch_rad",
+                             "left_spring_deflection_m", "right_spring_deflection_m",
+                             "leg_elastic_energy_J", "joint_elastic_energy_J",
+                             "left_knee_angle_rad", "right_knee_angle_rad",
+                             "left_ankle_angle_rad", "right_ankle_angle_rad",
+                             "drive_force_N"))
             writer.writerows(rows)
     return result
-
 
 def result_to_csv(results, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
