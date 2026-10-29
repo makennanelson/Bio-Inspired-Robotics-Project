@@ -8,10 +8,12 @@ SPRINGS = SpringParameters(dimensionless_stiffness=15.0, damping_ratio=0.20)
 
 # Compare with the current controller settings (250, 100).
 GAIN_TRIALS = [
-    (75.0, 25.0), (75.0, 50.0), (75.0, 75.0),
-    (100.0, 25.0), (100.0, 50.0), (100.0, 75.0),
-    (125.0, 25.0), (125.0, 50.0), (125.0, 75.0),
-    (150.0, 25.0), (150.0, 50.0), (150.0, 75.0),
+    (125.0, 50.0),
+    (125.0, 100.0),
+    (250.0, 50.0),
+    (250.0, 100.0),
+    (375.0, 50.0),
+    (375.0, 100.0),
 ]
 
 
@@ -39,8 +41,8 @@ def main():
             f"CoT={metrics['cost_of_transport']:.2f}"
         )
 
-    result_to_csv(results, OUTPUT / "run_controller_trials_refined.csv")
-    print("Saved results to results/run_controller_trials_refined.csv")
+    result_to_csv(results, OUTPUT / "run_controller_trials.csv")
+    print("Saved results to results/run_controller_trials.csv")
 
 
 if __name__ == "__main__":
