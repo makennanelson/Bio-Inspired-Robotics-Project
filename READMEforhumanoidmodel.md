@@ -1,4 +1,6 @@
-# Bio-Inspired Walking and Running Simulation
+# Optional Humanoid-v5 Animation Experiment
+
+This folder's Humanoid-v5 PPO experiment is separate from the primary articulated modified-SLIP model and its energy/stability results. Use it as an optional visual comparison only.
 
 This project uses MuJoCo to compare walking and running in a simplified, planar biped robot. We’re looking at how leg spring stiffness and damping affect energy use and stability in each gait.
 
