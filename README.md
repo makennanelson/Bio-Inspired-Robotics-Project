@@ -35,16 +35,13 @@ These results describe the simulation and do not establish how a physical robot 
 
 ## Run the analyses
 
+```bash
 python3 --version
-
 python3 -m venv .venv
-
 source .venv/bin/activate
-
 python -m pip install -r requirements.txt
-
 python run_experiments.py
-
+```
 To view a gait, run one at a time. On macOS, use mjpython:
 
     mjpython view_gait.py --gait walk
