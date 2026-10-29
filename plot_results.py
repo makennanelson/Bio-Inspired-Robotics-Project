@@ -4,7 +4,7 @@ import csv
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / "results"
+OUT = ROOT / "results" / "modified_slip"
 
 
 def rows(path):
