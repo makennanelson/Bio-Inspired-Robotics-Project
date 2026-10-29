@@ -35,15 +35,11 @@ These results describe the simulation and do not establish how a physical robot 
 
 ## Run the analyses
 
-    python -m venv .venv
-    source .venv/bin/activate       # Windows: .venv\Scripts\activate
-    python -m pip install -r requirements.txt
-    python run_experiments.py       # baseline walking and running tests
-    python plot_results.py          # baseline comparison plots
-    python optimize.py              # search stiffness/damping for each gait
-    python evaluate_shared.py       # compare shared and gait-specific settings
-    python sweep_parameters.py      # run the parameter sweep
-    python plot_sweep.py            # plot the new parameter sweep
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python run_experiments.py
 
 To view a gait, run one at a time. On macOS, use mjpython:
 
