@@ -2,7 +2,7 @@ from pathlib import Path
 
 from gait_sim import GAITS, SpringParameters, result_to_csv, run_simulation
 
-OUTPUT = Path(__file__).resolve().parent / "results"
+OUTPUT = Path(__file__).resolve().parent / "results" / "modified_slip"
 
 # Values to test
 STIFFNESS_VALUES = [5.0, 7.5, 10.0, 12.5, 15.0]
@@ -31,8 +31,8 @@ def main():
                     f"stable={result['stable']}"
                 )
 
-    result_to_csv(trials, OUTPUT / "results/parameter_sweep_tuned.csv")
-    print("Saved results to results/parameter_sweep_tuned.csv")
+    result_to_csv(trials, OUTPUT / "parameter_sweep.csv")
+    print("Saved results to results/modified_slip/parameter_sweep.csv")
 
 if __name__ == "__main__":
     main()
