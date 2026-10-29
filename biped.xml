@@ -1,4 +1,4 @@
-<mujoco model="planar_articulated_biped">
+<mujoco model="human_articulated_modified_slip">
   <compiler angle="radian" autolimits="true" inertiafromgeom="true"/>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" cone="elliptic"/>
   <size njmax="1000" nconmax="200"/>
@@ -13,9 +13,10 @@
     <site name="anchor_L" pos="0 0.075 0.04" size="0.012" rgba="1 0 0 1"/>
     <site name="anchor_R" pos="0 -0.075 0.04" size="0.012" rgba="1 0 0 1"/>
     <body name="torso" pos="0 0 0.82">
-      <joint name="root_x" type="slide" axis="1 0 0" limited="false" damping="0.05" armature="0.01"/>
-      <joint name="root_z" type="slide" axis="0 0 1" limited="false" damping="0.05" armature="0.01"/>
-      <joint name="root_pitch" type="hinge" axis="0 1 0" limited="false" damping="0.15" armature="0.01"/>
+      <!-- Zero root damping lets translation be ballistic when flight actuators are off. -->
+      <joint name="root_x" type="slide" axis="1 0 0" limited="false" damping="0" armature="0.01"/>
+      <joint name="root_z" type="slide" axis="0 0 1" limited="false" damping="0" armature="0.01"/>
+      <joint name="root_pitch" type="hinge" axis="0 1 0" limited="false" damping="0" armature="0.01"/>
       <!-- Keep the original torso box for its mass and collision behavior, but hide it. -->
       <geom name="torso_geom" type="box" pos="0 0 0" size="0.16 0.11 0.12" mass="9.0" rgba="0.85 0.35 0.12 0"/>
       <!-- Lightweight visual shapes give the torso a more human-like silhouette. -->
@@ -66,8 +67,8 @@
     <connect name="stance_R" site1="foot_site_R" site2="anchor_R"/>
   </equality>
   <actuator>
-    <motor name="drive" joint="root_x" gear="1" ctrlrange="-120 120"/>
-    <motor name="vertical_support" joint="root_z" gear="1" ctrlrange="-30 260"/>
+    <motor name="drive" joint="root_x" gear="1" ctrlrange="-450 450"/>
+    <motor name="vertical_support" joint="root_z" gear="1" ctrlrange="-60 240"/>
     <motor name="pitch_stabilizer" joint="root_pitch" gear="1" ctrlrange="-120 120"/>
     <motor name="hip_motor_L" joint="hip_L" gear="1" ctrlrange="-30 30"/>
     <motor name="hip_motor_R" joint="hip_R" gear="1" ctrlrange="-30 30"/>
