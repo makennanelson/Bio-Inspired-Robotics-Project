@@ -5,7 +5,7 @@ import json
 from gait_sim import GAITS, SpringParameters, result_to_csv, run_simulation
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / "results"
+OUT = ROOT / "results" / "modified_slip"
 
 
 def main():
