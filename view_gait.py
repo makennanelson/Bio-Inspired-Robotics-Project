@@ -23,6 +23,8 @@ def main():
     print(f"  stable: {result['stable']}")
     print(f"  cost of transport: {result['cost_of_transport']:.3f}")
     print(f"  distance: {result['distance_m']:.2f} m")
+    print(f"  actual flight fraction: {result['flight_fraction']:.3f}")
+    print(f"  scheduled flight fraction: {result['scheduled_flight_fraction']:.3f}")
 
 
 if __name__ == "__main__":
