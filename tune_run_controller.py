@@ -3,10 +3,10 @@ from pathlib import Path
 
 from gait_sim import GAITS, SpringParameters, result_to_csv, run_simulation
 
-OUTPUT = Path(__file__).resolve().parent / "results"
+OUTPUT = Path(__file__).resolve().parent / "results" / "modified_slip"
 SPRINGS = SpringParameters(dimensionless_stiffness=15.0, damping_ratio=0.20)
 
-# Compare with the current controller settings (250, 100).
+# Compare the selected settings with nearby running-controller gains.
 GAIN_TRIALS = [
     (125.0, 50.0),
     (125.0, 100.0),
@@ -42,7 +42,7 @@ def main():
         )
 
     result_to_csv(results, OUTPUT / "run_controller_trials.csv")
-    print("Saved results to results/run_controller_trials.csv")
+    print("Saved results to results/modified_slip/run_controller_trials.csv")
 
 
 if __name__ == "__main__":
