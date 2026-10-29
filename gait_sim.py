@@ -1,4 +1,4 @@
-"""Reduced-order planar biped simulation for the MAE 598 passive-energy project."""
+"""Human-shaped planar biped with articulated, modified-SLIP spring-leg dynamics."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -44,23 +44,28 @@ class GaitConfig:
     drive_ki: float = 100.0
     drive_force_limit: float = 450.0
 
+    def __post_init__(self):
+        if not 0.0 < self.duty_factor < 1.0:
+            raise ValueError("duty_factor must be between 0 and 1")
+        if self.name == "run" and self.duty_factor >= 0.5:
+            raise ValueError("the alternating-leg running schedule needs duty_factor < 0.5 to include flight")
+
     @property
     def period(self) -> float:
         return self.stride_length / self.speed
 
 GAITS = {
-    # Alternating support with an overlap; a compliant extension is added to the
-    # inverted-pendulum-like walking baseline for the project comparison.
+    # Alternating support with overlap approximates walking.
     "walk": GaitConfig("walk", speed=0.85, stride_length=0.72, duty_factor=0.62),
-    # Shorter stance fraction creates an aerial interval and SLIP-like rebound.
+    # With half-cycle-separated legs, duty_factor < 0.50 creates an aerial phase.
     "run": GaitConfig(
-    "run",
-    speed=2.0,
-    stride_length=1.05,
-    duty_factor=0.60,
-    drive_kp=150.0,
-    drive_ki=50.0,
-),
+        "run",
+        speed=2.0,
+        stride_length=1.05,
+        duty_factor=0.45,
+        drive_kp=150.0,
+        drive_ki=50.0,
+    ),
 }
 
 @dataclass(frozen=True)
@@ -105,6 +110,13 @@ def hip_reference(t: float, gait: GaitConfig, leg_offset: float) -> float:
 
 def gait_phase(t: float, gait: GaitConfig, leg_offset: float) -> float:
     return ((t / gait.period) + leg_offset) % 1.0
+
+def scheduled_stance(t: float, gait: GaitConfig) -> dict[str, bool]:
+    """Return the controller's stance schedule for alternating legs."""
+    return {
+        "L": gait_phase(t, gait, 0.0) < gait.duty_factor,
+        "R": gait_phase(t, gait, 0.5) < gait.duty_factor,
+    }
 
 def running_knee_reference(phase: float, duty_factor: float,
                            peak_flexion: float = 0.9) -> float:
@@ -168,6 +180,7 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     single_support_steps = 0
     double_support_steps = 0
     flight_steps = 0
+    scheduled_flight_steps = 0
     start_x = data.qpos[qadr["root_x"]]
     start_t = 0.0
     drive_integral = 0.0
@@ -201,23 +214,39 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
 
     for step in range(nsteps):
         t = step * dt
+        stance_now = scheduled_stance(t, gait)
+        scheduled_flight = not any(stance_now.values())
+        if scheduled_flight:
+            scheduled_flight_steps += 1
+
         vx = data.qvel[dadr["root_x"]]
         speed_error = gait.speed - vx
-        drive_integral = float(np.clip(drive_integral + speed_error * dt, -5.0, 5.0))
-        drive = np.clip(gait.drive_kp * speed_error + gait.drive_ki * drive_integral,
-                        -gait.drive_force_limit, gait.drive_force_limit)
+        if not scheduled_flight:
+            drive_integral = float(np.clip(drive_integral + speed_error * dt, -5.0, 5.0))
+            drive = np.clip(gait.drive_kp * speed_error + gait.drive_ki * drive_integral,
+                            -gait.drive_force_limit, gait.drive_force_limit)
+        else:
+            # No direct root force in flight: the torso translates ballistically.
+            # Swing-joint motors can still reposition the legs internally.
+            drive = 0.0
         data.ctrl[aids["drive"]] = drive
         root_z = data.qpos[qadr["root_z"]]
         root_z_rate = data.qvel[dadr["root_z"]]
         zref = gait.height_amplitude * (1.0 - math.cos(2.0 * math.pi * t / gait.period))
-        data.ctrl[aids["vertical_support"]] = np.clip(
-            gait.support_fraction * 10.66 * 9.81 +
-            gait.height_kp * (zref - root_z) - gait.height_kd * root_z_rate,
-            -60.0, 240.0)
+        if not scheduled_flight:
+            data.ctrl[aids["vertical_support"]] = np.clip(
+                gait.support_fraction * 10.66 * 9.81 +
+                gait.height_kp * (zref - root_z) - gait.height_kd * root_z_rate,
+                -60.0, 240.0)
+        else:
+            data.ctrl[aids["vertical_support"]] = 0.0
         pitch = data.qpos[qadr["root_pitch"]]
         pitch_rate = data.qvel[dadr["root_pitch"]]
-        data.ctrl[aids["pitch_stabilizer"]] = np.clip(
-            -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate, -120.0, 120.0)
+        if not scheduled_flight:
+            data.ctrl[aids["pitch_stabilizer"]] = np.clip(
+                -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate, -120.0, 120.0)
+        else:
+            data.ctrl[aids["pitch_stabilizer"]] = 0.0
         torso_x = float(data.xpos[trunk_id, 0])
         for side, offset, actuator in (("L", 0.0, "hip_motor_L"), ("R", 0.5, "hip_motor_R")):
             joint = f"hip_{side}"
@@ -349,7 +378,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             rows.append((t, data.qpos[qadr["root_x"]], torso_z, vx, pitch,
                          qL, qR, spring_energy, joint_spring_energy,
                          data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
-                         data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive))
+                         data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive,
+                         int(scheduled_flight), int(len(contacting_feet) == 0)))
 
     # Keep the final pose visible until the user closes the viewer window.
     if sim_viewer is not None:
@@ -402,6 +432,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         "single_support_fraction": single_support_steps / max(1, step + 1),
         "double_support_fraction": double_support_steps / max(1, step + 1),
         "flight_fraction": flight_steps / max(1, step + 1),
+        "scheduled_flight_fraction": scheduled_flight_steps / max(1, step + 1),
+        "duty_factor": gait.duty_factor,
         "final_com_height_m": float(data.xpos[trunk_id, 2]),
     }
     if output_csv:
@@ -413,7 +445,7 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
                              "leg_elastic_energy_J", "joint_elastic_energy_J",
                              "left_knee_angle_rad", "right_knee_angle_rad",
                              "left_ankle_angle_rad", "right_ankle_angle_rad",
-                             "drive_force_N"))
+                             "drive_force_N", "scheduled_flight", "actual_flight"))
             writer.writerows(rows)
     return result
 
