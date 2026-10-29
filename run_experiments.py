@@ -1,4 +1,4 @@
-=from pathlib import Path
+from pathlib import Path
 import json
 
 from gait_sim import GAITS, SpringParameters, result_to_csv, run_simulation
