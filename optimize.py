@@ -8,7 +8,7 @@ from scipy.optimize import minimize
 from gait_sim import GAITS, SpringParameters, result_to_csv, run_simulation
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / "results"
+OUT = ROOT / "results" / "modified_slip"
 BOUNDS = ((5.0, 35.0), (0.05, 0.65))  # dimensionless stiffness, damping ratio
 
 
