@@ -2,8 +2,9 @@ from pathlib import Path
 import csv
 import matplotlib.pyplot as plt
 
-data_file = Path("results/results/parameter_sweep_duty060_verified.csv")
-output_dir = Path("results/analysis")
+ROOT = Path(__file__).resolve().parent
+data_file = ROOT / "results/modified_slip/parameter_sweep.csv"
+output_dir = ROOT / "results/modified_slip/analysis"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 with data_file.open(newline="") as f:
@@ -47,7 +48,11 @@ for metric, title, limit_type in metrics:
             )
 
         if limit_type == "flight":
-            ax.axhline(0.05 if gait == "walk" else 0.55, color="red", linestyle="--")
+            if gait == "walk":
+                ax.axhline(0.05, color="red", linestyle="--", label="walk flight limit")
+            else:
+                ax.axhline(0.08, color="red", linestyle="--", label="minimum run flight")
+                ax.axhline(0.55, color="darkred", linestyle=":", label="maximum run flight")
         elif limit_type == "speed":
             target = 0.85 if gait == "walk" else 2.0
             ax.axhline(0.10 * target, color="red", linestyle="--")
@@ -64,4 +69,4 @@ for metric, title, limit_type in metrics:
     filename = metric + ".png"
     fig.savefig(output_dir / filename, dpi=200)
     plt.close(fig)
-    print(f"Saved results/analysis/{filename}")
+    print(f"Saved results/modified_slip/analysis/{filename}")
