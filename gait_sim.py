@@ -14,6 +14,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 MODEL_XML = ROOT / "biped.xml"
+# Foot capsule radius is 0.040 m. A 1 mm penetration avoids exact-tangency
+# contact flicker while the stance equality anchors the foot.
+STANCE_ANCHOR_Z_M = 0.039
 PASSIVE_JOINT_SPRINGS = {
     "knee_L": (60.0, 2.5),
     "knee_R": (60.0, 2.5),
@@ -62,7 +65,7 @@ GAITS = {
         "run",
         speed=2.0,
         stride_length=1.05,
-        duty_factor=0.45,
+        duty_factor=0.42,
         drive_kp=150.0,
         drive_ki=50.0,
     ),
@@ -200,6 +203,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     double_support_steps = 0
     flight_steps = 0
     scheduled_flight_steps = 0
+    left_contact_steps = 0
+    right_contact_steps = 0
     start_x = data.qpos[qadr["root_x"]]
     start_t = 0.0
     drive_integral = 0.0
@@ -220,7 +225,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         phase0 = gait_phase(0.0, gait, offset)
         data.eq_active[stance_eq[side]] = int(phase0 < gait.duty_factor)
         model.site_pos[anchor_site[side], :] = (
-            foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04)
+            foot_target_x[side], 0.075 if side == "L" else -0.075,
+            STANCE_ANCHOR_Z_M)
     mujoco.mj_forward(model, data)
 
     sim_viewer = viewer.launch_passive(model, data) if visualize else None
@@ -278,7 +284,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
                 # support, as in reduced-order walking templates.
                 foot_target_x[side] = float(data.geom_xpos[foot_geom_by_side[side], 0])
                 model.site_pos[anchor_site[side], :] = (
-                    foot_target_x[side], 0.075 if side == "L" else -0.075, 0.04)
+                    foot_target_x[side], 0.075 if side == "L" else -0.075,
+                    STANCE_ANCHOR_Z_M)
             previous_phase[side] = phase
             data.eq_active[stance_eq[side]] = int(phase < gait.duty_factor)
             if phase < gait.duty_factor:
@@ -388,6 +395,10 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             single_support_steps += 1
         else:
             double_support_steps += 1
+        left_contact = foot_geom_by_side["L"] in contacting_feet
+        right_contact = foot_geom_by_side["R"] in contacting_feet
+        left_contact_steps += int(left_contact)
+        right_contact_steps += int(right_contact)
         if not np.isfinite(data.qpos).all():
             stable = False
             termination_reason = "non_finite_state"
@@ -410,6 +421,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
                          qL, qR, spring_energy, joint_spring_energy,
                          data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
                          data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive,
+                         int(stance_now["L"]), int(stance_now["R"]),
+                         int(left_contact), int(right_contact),
                          int(scheduled_flight), int(len(contacting_feet) == 0)))
 
     # A viewer closed early is an incomplete run, not a successful stability check.
@@ -481,6 +494,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         "steady_rms_speed_error_m_s": math.sqrt(speed_sq_error / max(1, speed_error_samples)),
         "single_support_fraction": single_support_steps / max(1, step + 1),
         "double_support_fraction": double_support_steps / max(1, step + 1),
+        "left_foot_contact_fraction": left_contact_steps / max(1, step + 1),
+        "right_foot_contact_fraction": right_contact_steps / max(1, step + 1),
         "flight_fraction": flight_steps / max(1, step + 1),
         "scheduled_flight_fraction": scheduled_flight_steps / max(1, step + 1),
         "flight_fraction_difference": (
@@ -497,7 +512,9 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
                              "leg_elastic_energy_J", "joint_elastic_energy_J",
                              "left_knee_angle_rad", "right_knee_angle_rad",
                              "left_ankle_angle_rad", "right_ankle_angle_rad",
-                             "drive_force_N", "scheduled_flight", "actual_flight"))
+                             "drive_force_N", "scheduled_stance_L", "scheduled_stance_R",
+                             "left_foot_contact", "right_foot_contact",
+                             "scheduled_flight", "actual_flight"))
             writer.writerows(rows)
     return result
 
