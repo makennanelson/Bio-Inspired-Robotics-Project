@@ -10,8 +10,9 @@
   <worldbody>
     <light pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
     <geom name="floor" type="plane" pos="0 0 0" size="30 3 0.1" rgba="0.25 0.28 0.31 1"/>
-    <site name="anchor_L" pos="0 0.075 0.04" size="0.012" rgba="1 0 0 1"/>
-    <site name="anchor_R" pos="0 -0.075 0.04" size="0.012" rgba="1 0 0 1"/>
+    <!-- Foot capsule radius is 0.040 m; 1 mm overlap avoids exact-tangency contact flicker. -->
+    <site name="anchor_L" pos="0 0.075 0.039" size="0.012" rgba="1 0 0 1"/>
+    <site name="anchor_R" pos="0 -0.075 0.039" size="0.012" rgba="1 0 0 1"/>
     <body name="torso" pos="0 0 0.82">
       <!-- Zero root damping lets translation be ballistic when flight actuators are off. -->
       <joint name="root_x" type="slide" axis="1 0 0" limited="false" damping="0" armature="0.01"/>
@@ -63,8 +64,10 @@
     </body>
   </worldbody>
   <equality>
-    <connect name="stance_L" site1="foot_site_L" site2="anchor_L"/>
-    <connect name="stance_R" site1="foot_site_R" site2="anchor_R"/>
+    <connect name="stance_L" site1="foot_site_L" site2="anchor_L"
+         solref="0.005 1" solimp="0.99 0.999 0.001"/>
+    <connect name="stance_R" site1="foot_site_R" site2="anchor_R"
+         solref="0.005 1" solimp="0.99 0.999 0.001"/>
   </equality>
   <actuator>
     <motor name="drive" joint="root_x" gear="1" ctrlrange="-450 450"/>
