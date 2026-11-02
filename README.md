@@ -48,3 +48,9 @@ To view a gait, run one at a time. On macOS, use mjpython:
     mjpython view_gait.py --gait run
 
 The Humanoid-v5 PPO files are an optional, separate animation experiment. They are not the model used for the modified-SLIP energy and stability analyses.
+
+## To read Ground Stiffness Summary in Excel
+
+```bash
+open -a "Microsoft Excel" results/ground_stiffness/ground_stiffness_summary.csv
+```
