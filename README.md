@@ -71,7 +71,7 @@ python run_experiments.py
 python sweep_ground_stiffness.py
 python analyze_ground_stiffness.py
 
-## To view one gait at a time
+## To view on gait a time
 
 ```bash
 mjpython view_gait.py --gait walk
