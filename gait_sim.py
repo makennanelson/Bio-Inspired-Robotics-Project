@@ -70,28 +70,45 @@ GAITS = {
 
 @dataclass(frozen=True)
 class SpringParameters:
-    dimensionless_stiffness: float = 15.0  # k L / (m g)
+    dimensionless_stiffness: float = 15.0  # leg spring: k_leg L / (m g)
     damping_ratio: float = 0.20
+    dimensionless_ground_stiffness: float = 100.0  # ground spring: k_ground L / (m g)
 
 def physical_spring_parameters(params: SpringParameters, mass: float, leg_length: float):
-    """Convert kappa=kL/(mg), zeta=c/(2 sqrt(k m_eff)) to SI values."""
-    k = params.dimensionless_stiffness * mass * 9.81 / leg_length
+    """Return leg, ground, and series-equivalent spring/damper values in SI units.
+
+    The leg spring and compliant-ground spring are treated as two linear springs
+    in series: 1/k_eff = 1/k_leg + 1/k_ground. Their dimensionless stiffnesses
+    use the same L/(m g) scale, so the same relation applies to kappa.
+    Damping is represented by a single equivalent damper with the requested
+    damping ratio. This is a reduced-order approximation, not a deforming floor.
+    """
+    if params.dimensionless_stiffness <= 0 or params.dimensionless_ground_stiffness <= 0:
+        raise ValueError("leg and ground dimensionless stiffness must be positive")
+    if params.damping_ratio < 0:
+        raise ValueError("damping_ratio cannot be negative")
+
+    stiffness_scale = mass * 9.81 / leg_length
+    k_leg = params.dimensionless_stiffness * stiffness_scale
+    k_ground = params.dimensionless_ground_stiffness * stiffness_scale
+    k = (k_leg * k_ground) / (k_leg + k_ground)
     effective_mass_per_leg = mass / 2.0
     c = 2.0 * params.damping_ratio * math.sqrt(k * effective_mass_per_leg)
-    return k, c
+    return k_leg, k_ground, k, c
 
 def make_model(params: SpringParameters):
     """Load the MJCF and insert the candidate spring and damper values."""
     tree = ET.parse(MODEL_XML)
     root = tree.getroot()
     # The two slider joints are the axial leg springs in this template.
-    k, c = physical_spring_parameters(params, mass=10.66, leg_length=0.74)
+    k_leg, k_ground, k_effective, c_effective = physical_spring_parameters(
+        params, mass=10.66, leg_length=0.74)
     for name in ("spring_L", "spring_R"):
         joint = root.find(f".//joint[@name='{name}']")
-        joint.set("stiffness", f"{k:.9g}")
-        joint.set("damping", f"{c:.9g}")
+        joint.set("stiffness", f"{k_effective:.9g}")
+        joint.set("damping", f"{c_effective:.9g}")
     xml = ET.tostring(root, encoding="unicode")
-    return mujoco.MjModel.from_xml_string(xml), k, c
+    return mujoco.MjModel.from_xml_string(xml), k_leg, k_ground, k_effective, c_effective
 
 def smoothstep(x: float) -> float:
     x = min(1.0, max(0.0, x))
@@ -136,7 +153,7 @@ def _id(model, object_type, name):
 
 def run_simulation(gait: GaitConfig, params: SpringParameters,
                    output_csv: Path | None = None, visualize: bool = False):
-    model, k, c = make_model(params)
+    model, k_leg, k_ground, k, c = make_model(params)
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
     mujoco.mj_forward(model, data)
@@ -173,6 +190,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     max_ankle_angle = 0.0
     rows = []
     stable = True
+    # `stable` is a numerical/safety guard, not a formal periodic-gait test.
+    termination_reason = "completed_duration"
     max_height_error = 0.0
     max_spring_deflection = 0.0
     speed_sq_error = 0.0
@@ -369,9 +388,21 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             single_support_steps += 1
         else:
             double_support_steps += 1
-        if (not np.isfinite(data.qpos).all() or torso_z < 0.40 or abs(pitch) > 0.9
-                or max_spring_deflection >= 0.195):
+        if not np.isfinite(data.qpos).all():
             stable = False
+            termination_reason = "non_finite_state"
+            break
+        if torso_z < 0.40:
+            stable = False
+            termination_reason = "torso_below_0.40_m"
+            break
+        if abs(pitch) > 0.9:
+            stable = False
+            termination_reason = "pitch_exceeded_0.90_rad"
+            break
+        if max_spring_deflection >= 0.195:
+            stable = False
+            termination_reason = "spring_deflection_reached_0.195_m"
             break
         # Save at 50 Hz, enough for plotting and report figures.
         if step % 10 == 0:
@@ -380,6 +411,11 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
                          data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
                          data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive,
                          int(scheduled_flight), int(len(contacting_feet) == 0)))
+
+    # A viewer closed early is an incomplete run, not a successful stability check.
+    if stable and data.time < gait.duration - dt:
+        stable = False
+        termination_reason = "stopped_before_requested_duration"
 
     # Keep the final pose visible until the user closes the viewer window.
     if sim_viewer is not None:
@@ -400,8 +436,22 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         "distance_m": distance,
         "duration_s": elapsed,
         "stable": stable,
+        "termination_reason": termination_reason,
+        "stability_check": (
+            "completed without non-finite qpos, torso_z < 0.40 m, "
+            "abs(pitch) > 0.90 rad, or spring deflection >= 0.195 m; "
+            "not a formal periodic-gait stability test"
+        ),
         "dimensionless_stiffness": params.dimensionless_stiffness,
+        "dimensionless_ground_stiffness": params.dimensionless_ground_stiffness,
+        "relative_leg_ground_stiffness": (
+            params.dimensionless_stiffness / params.dimensionless_ground_stiffness),
+        "dimensionless_effective_stiffness": (
+            params.dimensionless_stiffness * params.dimensionless_ground_stiffness /
+            (params.dimensionless_stiffness + params.dimensionless_ground_stiffness)),
         "damping_ratio": params.damping_ratio,
+        "leg_stiffness_N_m": k_leg,
+        "ground_stiffness_N_m": k_ground,
         "spring_stiffness_N_m": k,
         "spring_damping_Ns_m": c,
         "knee_spring_stiffness_Nm_rad": 60.0,
@@ -433,6 +483,8 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         "double_support_fraction": double_support_steps / max(1, step + 1),
         "flight_fraction": flight_steps / max(1, step + 1),
         "scheduled_flight_fraction": scheduled_flight_steps / max(1, step + 1),
+        "flight_fraction_difference": (
+            flight_steps - scheduled_flight_steps) / max(1, step + 1),
         "duty_factor": gait.duty_factor,
         "final_com_height_m": float(data.xpos[trunk_id, 2]),
     }
