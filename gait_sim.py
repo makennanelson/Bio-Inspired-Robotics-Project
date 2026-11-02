@@ -65,7 +65,7 @@ GAITS = {
         "run",
         speed=2.0,
         stride_length=1.05,
-        duty_factor=0.42,
+        duty_factor=0.38,
         drive_kp=150.0,
         drive_ki=50.0,
     ),
@@ -138,15 +138,23 @@ def scheduled_stance(t: float, gait: GaitConfig) -> dict[str, bool]:
         "R": gait_phase(t, gait, 0.5) < gait.duty_factor,
     }
 
-def running_knee_reference(phase: float, duty_factor: float,
-                           peak_flexion: float = 0.9) -> float:
-    """Bend the knee during swing, then extend it before the next touchdown."""
+def running_knee_reference(
+    phase: float,
+    duty_factor: float,
+    peak_flexion: float = 0.9,
+    extension_start: float = 0.40,
+) -> float:
+    """Tuck the knee in swing, then extend it earlier before touchdown."""
     if phase < duty_factor or duty_factor >= 1.0:
         return 0.0
+
     swing_phase = (phase - duty_factor) / (1.0 - duty_factor)
-    if swing_phase < 0.5:
-        return -peak_flexion * smoothstep(swing_phase / 0.5)
-    return -peak_flexion * (1.0 - smoothstep((swing_phase - 0.5) / 0.5))
+
+    if swing_phase < extension_start:
+        return -peak_flexion * smoothstep(swing_phase / extension_start)
+
+    extension_phase = (swing_phase - extension_start) / (1.0 - extension_start)
+    return -peak_flexion * (1.0 - smoothstep(extension_phase))
 
 def _id(model, object_type, name):
     value = mujoco.mj_name2id(model, object_type, name)
