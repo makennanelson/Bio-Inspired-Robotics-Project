@@ -11,13 +11,17 @@ def main():
                         help="dimensionless spring stiffness (default: 15)")
     parser.add_argument("--zeta", type=float, default=0.20,
                         help="spring damping ratio (default: 0.20)")
+    parser.add_argument("--ground-kappa", type=float, default=100.0,
+                        help="dimensionless ground stiffness (default: 100)")
     args = parser.parse_args()
 
     params = SpringParameters(
         dimensionless_stiffness=args.kappa,
         damping_ratio=args.zeta,
+        dimensionless_ground_stiffness=args.ground_kappa,
     )
-    print(f"Opening {args.gait} simulation: kappa={args.kappa:g}, zeta={args.zeta:g}")
+    print(f"Opening {args.gait} simulation: leg kappa={args.kappa:g}, "
+          f"ground kappa={args.ground_kappa:g}, zeta={args.zeta:g}")
     result = run_simulation(GAITS[args.gait], params, visualize=True)
     print("Simulation summary after closing the viewer:")
     print(f"  stable: {result['stable']}")
