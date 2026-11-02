@@ -90,6 +90,7 @@ def main() -> None:
         fields = ["gait", "target_speed_m_s", "dimensionless_ground_stiffness",
                   "actual_flight_fraction", "scheduled_flight_fraction",
                   "absolute_flight_gap", "gap_over_0.05", "stable_guard",
+                  "left_foot_contact_fraction", "right_foot_contact_fraction",
                   "termination_reason"]
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
@@ -106,6 +107,8 @@ def main() -> None:
                 "absolute_flight_gap": abs(actual - scheduled),
                 "gap_over_0.05": abs(actual - scheduled) > 0.05,
                 "stable_guard": row["stable"],
+                "left_foot_contact_fraction": row.get("left_foot_contact_fraction", "not_recorded"),
+                "right_foot_contact_fraction": row.get("right_foot_contact_fraction", "not_recorded"),
                 "termination_reason": row.get("termination_reason", "not_recorded"),
             })
 
