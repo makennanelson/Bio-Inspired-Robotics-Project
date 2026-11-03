@@ -69,10 +69,23 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python run_experiments.py
 python sweep_ground_stiffness.py
-python analyze_ground_stiffness.py
+python analyze_ground_stiffness.py 
 
-## To view on gait a time
+## View one gait at a time
+
+Run one command at a time:
+
 
 ```bash
 mjpython view_gait.py --gait walk
+```
+
+```bash
 mjpython view_gait.py --gait run
+```
+
+## Open the ground-stiffness CSV in Microsoft Excel (macOS)
+
+```bash
+open -a "Microsoft Excel" "results/ground_stiffness/ground_stiffness_summary.csv"
+```
