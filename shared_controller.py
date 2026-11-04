@@ -22,7 +22,7 @@ def make_shared_gait(
     # The existing sweep suggests softer ground needs slightly more scheduled
     # flight. This is an initial calibration to test, not a proven optimum.
     kappa = max(10.0, min(200.0, dimensionless_ground_stiffness))
-    run_duty = 0.354 + (kappa - 10.0) * (0.402 - 0.354) / 190.0
+    run_duty = 0.354 + (kappa - 10.0) * (0.423 - 0.354) / 190.0
 
     duty_factor = (1.0 - blend) * walk.duty_factor + blend * run_duty
     cadence_blend = smoothstep(
