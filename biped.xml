@@ -75,8 +75,8 @@
     <motor name="pitch_stabilizer" joint="root_pitch" gear="1" ctrlrange="-120 120"/>
     <motor name="hip_motor_L" joint="hip_L" gear="1" ctrlrange="-30 30"/>
     <motor name="hip_motor_R" joint="hip_R" gear="1" ctrlrange="-30 30"/>
-    <motor name="knee_motor_L" joint="knee_L" gear="1" ctrlrange="-70 70"/>
-    <motor name="knee_motor_R" joint="knee_R" gear="1" ctrlrange="-70 70"/>
+    <motor name="knee_motor_L" joint="knee_L" gear="1" ctrlrange="-100 100"/>
+    <motor name="knee_motor_R" joint="knee_R" gear="1" ctrlrange="-100 100"/>
     <motor name="spring_reset_L" joint="spring_L" gear="1" ctrlrange="-180 180"/>
     <motor name="spring_reset_R" joint="spring_R" gear="1" ctrlrange="-180 180"/>
   </actuator>

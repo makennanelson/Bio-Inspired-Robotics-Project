@@ -46,6 +46,7 @@ class GaitConfig:
     drive_kp: float = 250.0
     drive_ki: float = 100.0
     drive_force_limit: float = 450.0
+    run_blend: float = 0.0
 
     def __post_init__(self):
         if not 0.0 < self.duty_factor < 1.0:
@@ -310,12 +311,13 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             # touchdown. Walking leaves the new knee motors inactive.
             knee_name = f"knee_{side}"
             knee_motor = f"knee_motor_{side}"
-            if gait.name == "run":
-                knee_ref = running_knee_reference(phase, gait.duty_factor)
+            if gait.run_blend > 0.0:
+                knee_ref = gait.run_blend * running_knee_reference(
+                    phase, gait.duty_factor
+                )
                 knee_q = data.qpos[qadr[knee_name]]
                 knee_qd = data.qvel[dadr[knee_name]]
-                knee_torque = np.clip(130.0 * (knee_ref - knee_q) - 5.0 * knee_qd,
-                                      -70.0, 70.0)
+                knee_torque = np.clip(130.0 * (knee_ref - knee_q) - 5.0 * knee_qd, -100.0, 100.0)
                 data.ctrl[aids[knee_motor]] = knee_torque
             else:
                 data.ctrl[aids[knee_motor]] = 0.0
@@ -425,13 +427,25 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             break
         # Save at 50 Hz, enough for plotting and report figures.
         if step % 10 == 0:
+            left_foot_geom_z = float(data.geom_xpos[foot_geom_by_side["L"], 2])
+            right_foot_geom_z = float(data.geom_xpos[foot_geom_by_side["R"], 2])
+
+            left_floor_distance = float(mujoco.mj_geomDistance(
+                model, data, foot_geom_by_side["L"], floor_geom, 1.0, np.zeros(6)
+            ))
+            right_floor_distance = float(mujoco.mj_geomDistance(
+                model, data, foot_geom_by_side["R"], floor_geom, 1.0, np.zeros(6)
+            ))
+
             rows.append((t, data.qpos[qadr["root_x"]], torso_z, vx, pitch,
-                         qL, qR, spring_energy, joint_spring_energy,
-                         data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
-                         data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive,
-                         int(stance_now["L"]), int(stance_now["R"]),
-                         int(left_contact), int(right_contact),
-                         int(scheduled_flight), int(len(contacting_feet) == 0)))
+                 left_foot_geom_z, right_foot_geom_z,
+                 left_floor_distance, right_floor_distance,
+                 qL, qR, spring_energy, joint_spring_energy,
+                 data.qpos[qadr["knee_L"]], data.qpos[qadr["knee_R"]],
+                 data.qpos[qadr["ankle_L"]], data.qpos[qadr["ankle_R"]], drive,
+                 int(stance_now["L"]), int(stance_now["R"]),
+                 int(left_contact), int(right_contact),
+                 int(scheduled_flight), int(len(contacting_feet) == 0)))
 
     # A viewer closed early is an incomplete run, not a successful stability check.
     if stable and data.time < gait.duration - dt:
@@ -516,13 +530,15 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         with output_csv.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(("time_s", "x_m", "com_height_m", "speed_m_s", "pitch_rad",
-                             "left_spring_deflection_m", "right_spring_deflection_m",
-                             "leg_elastic_energy_J", "joint_elastic_energy_J",
-                             "left_knee_angle_rad", "right_knee_angle_rad",
-                             "left_ankle_angle_rad", "right_ankle_angle_rad",
-                             "drive_force_N", "scheduled_stance_L", "scheduled_stance_R",
-                             "left_foot_contact", "right_foot_contact",
-                             "scheduled_flight", "actual_flight"))
+                            "left_foot_geom_z_m", "right_foot_geom_z_m",
+                            "left_foot_floor_distance_m", "right_foot_floor_distance_m",
+                            "left_spring_deflection_m", "right_spring_deflection_m",
+                            "leg_elastic_energy_J", "joint_elastic_energy_J",
+                            "left_knee_angle_rad", "right_knee_angle_rad",
+                            "left_ankle_angle_rad", "right_ankle_angle_rad",
+                            "drive_force_N", "scheduled_stance_L", "scheduled_stance_R",
+                            "left_foot_contact", "right_foot_contact",
+                            "scheduled_flight", "actual_flight"))
             writer.writerows(rows)
     return result
 
