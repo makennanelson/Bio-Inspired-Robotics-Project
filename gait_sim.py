@@ -34,8 +34,8 @@ class GaitConfig:
     hip_amplitude: float = 0.30
     hip_kp: float = 48.0
     hip_kd: float = 2.8
-    pitch_kp: float = 80.0
-    pitch_kd: float = 12.0
+    pitch_kp: float = 150.0
+    pitch_kd: float = 22.0
     height_kp: float = 1200.0
     height_kd: float = 80.0
     height_amplitude: float = 0.015
@@ -66,9 +66,10 @@ GAITS = {
         "run",
         speed=2.0,
         stride_length=1.05,
-        duty_factor=0.38,
+        duty_factor=0.48,
         drive_kp=150.0,
         drive_ki=50.0,
+        run_blend=1.0,
     ),
 }
 
@@ -276,9 +277,9 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             data.ctrl[aids["vertical_support"]] = 0.0
         pitch = data.qpos[qadr["root_pitch"]]
         pitch_rate = data.qvel[dadr["root_pitch"]]
-        if not scheduled_flight:
+        if gait.name == "run" or not scheduled_flight:
             data.ctrl[aids["pitch_stabilizer"]] = np.clip(
-                -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate, -120.0, 120.0)
+            -gait.pitch_kp * pitch - gait.pitch_kd * pitch_rate, -120.0, 120.0)
         else:
             data.ctrl[aids["pitch_stabilizer"]] = 0.0
         torso_x = float(data.xpos[trunk_id, 0])

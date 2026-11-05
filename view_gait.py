@@ -1,5 +1,6 @@
 """Show one of the existing prescribed gait simulations in the MuJoCo viewer."""
 import argparse
+from pathlib import Path
 
 from gait_sim import GAITS, SpringParameters, run_simulation
 
@@ -22,9 +23,18 @@ def main():
     )
     print(f"Opening {args.gait} simulation: leg kappa={args.kappa:g}, "
           f"ground kappa={args.ground_kappa:g}, zeta={args.zeta:g}")
-    result = run_simulation(GAITS[args.gait], params, visualize=True)
+    
+    csv_path = Path("results") / f"viewer_{args.gait}_ground_{args.ground_kappa:g}.csv"
+    result = run_simulation(
+        GAITS[args.gait],
+        params,
+        output_csv=csv_path,
+        visualize=True,
+    )
+    print(f"Saved telemetry to {csv_path}")
     print("Simulation summary after closing the viewer:")
     print(f"  stable: {result['stable']}")
+    print(f"  termination reason: {result['termination_reason']}")
     print(f"  cost of transport: {result['cost_of_transport']:.3f}")
     print(f"  distance: {result['distance_m']:.2f} m")
     print(f"  actual flight fraction: {result['flight_fraction']:.3f}")
