@@ -32,6 +32,7 @@ class GaitConfig:
     duty_factor: float
     duration: float = 6.0
     hip_amplitude: float = 0.30
+    touchdown_angle_deg: float = 17.1887338539
     hip_kp: float = 48.0
     hip_kd: float = 2.8
     pitch_kp: float = 150.0
@@ -128,7 +129,8 @@ def hip_reference(t: float, gait: GaitConfig, leg_offset: float) -> float:
         return -a + 2.0 * a * (phase / d)
     # Swing phase brings the leg forward for the next touchdown.
     u = (phase - d) / (1.0 - d)
-    return a - 2.0 * a * smoothstep(u)
+    touchdown_target = -math.radians(gait.touchdown_angle_deg)
+    return a + (touchdown_target - a) * smoothstep(u)
 
 def gait_phase(t: float, gait: GaitConfig, leg_offset: float) -> float:
     return ((t / gait.period) + leg_offset) % 1.0
@@ -201,6 +203,17 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     previous_joint_spring_energy = 0.0
     max_knee_angle = 0.0
     max_ankle_angle = 0.0
+    time_to_max_spring_deflection = 0.0
+    time_to_first_spring_compression_peak = 0.0
+    previous_spring_deflection = 0.0
+    previous_previous_spring_deflection = 0.0
+    first_spring_peak_found = False
+    peak_ground_force = 0.0
+    time_to_peak_ground_force = 0.0
+    time_to_first_ground_force_peak = 0.0
+    previous_total_normal_force = 0.0
+    previous_previous_total_normal_force = 0.0
+    first_force_peak_found = False
     rows = []
     stable = True
     # `stable` is a numerical/safety guard, not a formal periodic-gait test.
@@ -215,6 +228,7 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     scheduled_flight_steps = 0
     left_contact_steps = 0
     right_contact_steps = 0
+    actual_touchdown_angles_deg = []
     start_x = data.qpos[qadr["root_x"]]
     start_t = 0.0
     drive_integral = 0.0
@@ -228,6 +242,9 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
     stance_eq = {side: _id(model, mujoco.mjtObj.mjOBJ_EQUALITY, f"stance_{side}")
                  for side in ("L", "R")}
     trunk_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+    leg_body_ids = {side: _id(model, mujoco.mjtObj.mjOBJ_BODY, f"leg_{side}")
+                    for side in ("L", "R")}
+    previous_foot_contact = {"L": False, "R": False}
     foot_target_x = {side: float(data.geom_xpos[geom, 0])
                      for side, geom in foot_geom_by_side.items()}
     previous_phase = {"L": 0.0, "R": 0.5}
@@ -351,7 +368,18 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
 
         qL, qR = data.qpos[qadr["spring_L"]], data.qpos[qadr["spring_R"]]
         vL, vR = data.qvel[dadr["spring_L"]], data.qvel[dadr["spring_R"]]
-        max_spring_deflection = max(max_spring_deflection, abs(qL), abs(qR))
+        current_spring_deflection = max(abs(qL), abs(qR))
+        if current_spring_deflection > max_spring_deflection:
+            max_spring_deflection = current_spring_deflection
+            time_to_max_spring_deflection = t
+        if (not first_spring_peak_found and t >= 0.5 and
+                previous_spring_deflection >= previous_previous_spring_deflection and
+                previous_spring_deflection > current_spring_deflection and
+                previous_spring_deflection >= 0.001):
+            time_to_first_spring_compression_peak = t - dt
+            first_spring_peak_found = True
+        previous_previous_spring_deflection = previous_spring_deflection
+        previous_spring_deflection = current_spring_deflection
         spring_energy = 0.5 * k * (qL*qL + qR*qR)
         change = spring_energy - previous_spring_energy
         spring_loaded += max(0.0, change)
@@ -408,6 +436,38 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             double_support_steps += 1
         left_contact = foot_geom_by_side["L"] in contacting_feet
         right_contact = foot_geom_by_side["R"] in contacting_feet
+        for side, in_contact in (("L", left_contact), ("R", right_contact)):
+            if in_contact and not previous_foot_contact[side] and t >= 0.5:
+                # Measure the actual world-frame thigh angle at the first
+                # contact transition; positive angles point forward (+x).
+                rotation = data.xmat[leg_body_ids[side]].reshape(3, 3)
+                thigh_direction = rotation @ np.array([0.0, 0.0, -1.0])
+                actual_touchdown_angles_deg.append(math.degrees(math.atan2(
+                    float(thigh_direction[0]), float(-thigh_direction[2]))))
+            previous_foot_contact[side] = in_contact
+        # Sum floor-normal forces from both feet. Ignore the initial settling
+        # transient so the reported peak describes gait contacts.
+        if t >= 0.5:
+            total_normal_force = 0.0
+            for ci in range(data.ncon):
+                con = data.contact[ci]
+                if ((con.geom1 == floor_geom and con.geom2 in foot_geoms) or
+                        (con.geom2 == floor_geom and con.geom1 in foot_geoms)):
+                    contact_force = np.zeros(6, dtype=float)
+                    mujoco.mj_contactForce(model, data, ci, contact_force)
+                    total_normal_force += max(0.0, float(contact_force[0]))
+            if total_normal_force > peak_ground_force:
+                peak_ground_force = total_normal_force
+                time_to_peak_ground_force = t
+            body_weight_now = float(model.body_mass[1:].sum()) * 9.81
+            if (not first_force_peak_found and t >= 0.5 and
+                    previous_total_normal_force >= previous_previous_total_normal_force and
+                    previous_total_normal_force > total_normal_force and
+                    previous_total_normal_force >= body_weight_now):
+                time_to_first_ground_force_peak = t - dt
+                first_force_peak_found = True
+            previous_previous_total_normal_force = previous_total_normal_force
+            previous_total_normal_force = total_normal_force
         left_contact_steps += int(left_contact)
         right_contact_steps += int(right_contact)
         if not np.isfinite(data.qpos).all():
@@ -463,7 +523,9 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
 
     elapsed = data.time
     distance = max(0.0, data.qpos[qadr["root_x"]] - start_x)
-    mass = 10.66
+    mass = float(model.body_mass[1:].sum())
+    body_weight = mass * model.opt.gravity[2] * -1.0
+    gravity_time_scale = math.sqrt(0.74 / 9.81)
     cost_of_transport = positive_work / max(mass * 9.81 * distance, 1e-6)
     return_fraction = spring_released / max(spring_loaded, 1e-9)
     result = {
@@ -486,6 +548,22 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
             params.dimensionless_stiffness * params.dimensionless_ground_stiffness /
             (params.dimensionless_stiffness + params.dimensionless_ground_stiffness)),
         "damping_ratio": params.damping_ratio,
+        "touchdown_angle_deg": gait.touchdown_angle_deg,
+        "actual_touchdown_event_count": len(actual_touchdown_angles_deg),
+        "mean_actual_touchdown_angle_deg": (
+            float(np.mean(actual_touchdown_angles_deg))
+            if actual_touchdown_angles_deg else 0.0),
+        "mean_abs_actual_touchdown_angle_deg": (
+            float(np.mean(np.abs(actual_touchdown_angles_deg)))
+            if actual_touchdown_angles_deg else 0.0),
+        "peak_ground_force_N": peak_ground_force,
+        "peak_ground_force_body_weights": peak_ground_force / max(body_weight, 1e-9),
+        "time_to_peak_ground_force_s": time_to_peak_ground_force,
+        "dimensionless_time_to_peak_ground_force": (
+            time_to_peak_ground_force / gravity_time_scale),
+        "time_to_first_ground_force_peak_s": time_to_first_ground_force_peak,
+        "dimensionless_time_to_first_ground_force_peak": (
+            time_to_first_ground_force_peak / gravity_time_scale),
         "leg_stiffness_N_m": k_leg,
         "ground_stiffness_N_m": k_ground,
         "spring_stiffness_N_m": k,
@@ -513,6 +591,12 @@ def run_simulation(gait: GaitConfig, params: SpringParameters,
         "max_abs_ankle_angle_rad": max_ankle_angle,
         "max_com_height_deviation_m": max_height_error,
         "max_spring_deflection_m": max_spring_deflection,
+        "time_to_max_spring_deflection_s": time_to_max_spring_deflection,
+        "dimensionless_time_to_max_spring_deflection": (
+            time_to_max_spring_deflection / gravity_time_scale),
+        "time_to_first_spring_compression_peak_s": time_to_first_spring_compression_peak,
+        "dimensionless_time_to_first_spring_compression_peak": (
+            time_to_first_spring_compression_peak / gravity_time_scale),
         "rms_speed_error_m_s": math.sqrt(speed_sq_error / max(1, speed_error_samples)),
         "steady_rms_speed_error_m_s": math.sqrt(speed_sq_error / max(1, speed_error_samples)),
         "single_support_fraction": single_support_steps / max(1, step + 1),
@@ -550,3 +634,4 @@ def result_to_csv(results, path: Path):
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
+
