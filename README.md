@@ -1,91 +1,65 @@
-# Bio-Inspired Walking and Running Simulation
+Bio-Inspired Walking and Running Simulation
+This project uses MuJoCo to simulate a human-shaped, two-legged robot. The model is based on the spring-loaded inverted pendulum (SLIP) idea. We use it to study walking and running while changing the stiffness of the simulated ground.
 
-This project simulates a human-shaped, articulated planar biped using a modified SLIP-style model. It compares walking and running while varying the stiffness of the ground relative to the leg spring.
+Walking and running use separate schedules. The robot does not change between them by itself. The same leg spring stiffness and damping are used for both gaits in the ground-stiffness sweep.
+Project question
+How does changing ground stiffness affect energy use and foot-ground contact during walking and running when leg stiffness and damping stay the same?
+Model
+The model has a torso, pelvis, thighs, shanks, and feet. Each leg has a spring and damper along its length, passive spring-like knee and ankle joints, and a controlled hip. During running, knee motors move the legs during swing and prepare them for landing.
 
-The model uses the same leg-spring parameters for both gaits. Walking and running have separate prescribed gait schedules; the robot does not switch between them automatically.
+This is a modified SLIP model. The torso has motors that help it move forward, rise, and control its pitch during stance. Those motors turn off during planned flight, but the hip and knee motors can still move the legs. The model is not a fully passive SLIP robot, and it is not a physical robot.
 
-## Project question
+The model uses a mass of 10.66 kg, a nominal leg length of 0.74 m, and gravity of 9.81 m/s². The floor is rigid in the simulation. Ground softness is represented with a spring in series with the leg spring:
+1 / k_effective = 1 / k_leg + 1 / k_ground
+This spring model approximates ground compliance; the floor itself does not deform.
+Dimensionless parameters
+Dimensionless values let us describe stiffness and time relative to the robot’s size, weight, and gravity:
+κ = k L / (m g)
+τ = t √(g / L)
+Here, k is spring stiffness, L is leg length, m is robot mass, g is gravity, and t is time in seconds. A larger κ means a stiffer spring compared with the robot’s weight and leg length. τ expresses time using the gravity-and-leg-length time scale. The same dimensionless value can correspond to different stiffnesses in N/m or times in seconds if the mass, leg length, or gravity changes.
 
-How does ground stiffness affect energy use and foot-ground contact during walking and running when the leg-spring properties are held constant?
+The spring force, stored energy, and damper energy loss are calculated as:
+Spring force magnitude: F_s = k (L_0 - L) - c L_dot
+Spring energy:          E_s = 1/2 k (L_0 - L)^2
+Damper loss rate:       P_d = c L_dot^2
+L is the current leg length, L_0 is its resting length, L_dot is the change in leg length over time, and c is damping.
+Gait schedules
+Gait	Target speed	Stride length	Duty factor	Schedule
+Walk	0.85 m/s	0.72 m	0.62	The legs have overlapping support; no planned flight.
+Run in the current code	2.00 m/s	1.05 m	0.48	The legs are half a cycle apart; about 4% of the cycle has no scheduled stance.
 
-## Model and assumptions
 
-The torso, pelvis, thighs, shanks, and feet give the model an articulated, human-like shape. Each leg has an axial spring-damper, passive torsional knee and ankle springs, and hip control. During running, knee motors flex the leg during swing and extend it before touchdown.
+The duty factor is the fraction of a leg’s cycle when that leg is scheduled to support the robot. Planned flight does not guarantee actual flight: MuJoCo separately measures whether the feet lose contact with the ground.
+What the simulation measures
+The simulation records motor work, cost of transport, spring energy stored and released, damping losses, joint angles, speed error, torso height, foot contacts, support time, and planned and measured flight time. Spring energy is reported separately from motor work because motors can add energy to the model.
 
-The axial spring force acts along the leg’s compression axis. With leg length \(L\), rest length \(L_0\), and length rate \(\dot{L}\), its magnitude is:
+The stable result means only that a run finished without crossing the code’s numerical and safety limits. It does not prove that the gait repeats reliably or is stable after a push.
+Ground-stiffness tests and saved results
+The ground-stiffness script tests both gaits at dimensionless ground stiffness values of 10, 25, 50, 100, and 200. It keeps leg stiffness at κ_leg = 15 and damping ratio at ζ = 0.20. This produces ten runs in total.
 
-\[
-F_s = k(L_0 - L) - c\dot{L}
-\]
+Important: the saved results and current code use different running schedules. The CSV files included in this ZIP were generated with running duty factor 0.38. The current gait_sim.py sets it to 0.48. At 0.38, the schedule plans about 24% flight; at 0.48, it plans about 4%. The archived CSVs show about 23.3% scheduled flight and about 27.6–29.1% measured flight during running. Their flight-schedule gap is over 0.05 at ground stiffness 10 and 25, and below 0.05 at 50, 100, and 200.
 
-The corresponding spring energy and damper loss rate are:
+The ten archived tests finished without triggering the code’s numerical and safety checks. These archived results describe the 0.38 running schedule, not a fresh run of the current 0.48 code. If you run the sweep again, the CSV files will be replaced with results from the current code settings. Keep a copy of the archived files if you want to compare the two schedules.
 
-\[
-E_s = \frac{1}{2}k(L_0 - L)^2
-\]
-
-\[
-P_d = c\dot{L}^2
-\]
-
-The model represents leg and ground compliance as two linear springs in series:
-
-\[
-\frac{1}{k_{\mathrm{eff}}} =
-\frac{1}{k_{\mathrm{leg}}} +
-\frac{1}{k_{\mathrm{ground}}}
-\]
-
-This is a reduced-order approximation: the floor itself does not deform in the simulation. The dimensionless leg and ground stiffnesses are defined as:
-
-\[
-\kappa = \frac{kL}{mg}
-\]
-
-The simulation uses a mass of 10.66 kg and a leg length of 0.74 m.
-
-The walking schedule uses a duty factor of 0.62, creating overlapping support. The running schedule uses a duty factor of 0.38, with the legs offset by half a cycle. This schedules about 24% of the cycle with neither leg in stance. The actual robot must also lose foot-ground contact for that time to count as simulated flight.
-
-During scheduled flight, direct root-level forward drive, vertical support, and pitch stabilization are set to zero. The root has no joint damping, so gravity drives the torso during flight. Hip and knee motors can still reposition the legs. During stance, the model retains root-level forward, vertical, and pitch assistance, and their work is included in the energy accounting. This is an actuated modified-SLIP model, not a fully passive SLIP system.
-
-## Measurements and current results
-
-The simulation records actuator work, cost of transport, axial and joint spring loading and release, damping loss, joint angles, speed error, center-of-mass height, support fractions, actual flight, and scheduled flight. Spring energy storage and release are reported separately from motor work because motors can add energy to the model.
-
-The ground-stiffness sweep tests both walking and running at dimensionless ground stiffness values of 10, 25, 50, 100, and 200. It holds dimensionless leg stiffness at 15 and damping ratio at 0.20.
-
-In the current saved results, all ten simulations completed the code’s numerical and safety checks. Walking’s measured flight fraction is approximately zero, as expected for its schedule. For running, measured flight is about 0.276–0.291, compared with about 0.233 scheduled. The measured-versus-scheduled difference is greater than 0.05 at ground stiffness values 10 and 25, and less than 0.05 at 50, 100, and 200.
-
-The `stable` field means the simulation completed without triggering its numerical and safety guards. It does not establish formal periodic-gait stability. The results describe this simulation and do not establish how a physical robot would perform.
-
-## Run the analyses
-
-On macOS, from the project folder:
-
-```bash
+The results apply to this model and controller. They do not show how a person or a physical robot would perform.
+Setup and run the simulations
+These commands are for macOS. Run them from the project folder:
 python3 --version
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+Run the baseline walking and running tests:
 python run_experiments.py
+Run the ground-stiffness sweep:
 python sweep_ground_stiffness.py
-python analyze_ground_stiffness.py 
-
-## View one gait at a time
-
-Run one command at a time:
-
-
-```bash
+Analyze the sweep and make plots:
+python analyze_ground_stiffness.py
+The sweep writes its CSV files to results/ground_stiffness/. The analysis script saves plots and a flight-schedule diagnostic CSV in results/ground_stiffness/analysis/.
+View a gait
+On macOS, use mjpython to open the MuJoCo viewer. Run one gait at a time:
 mjpython view_gait.py --gait walk
-```
-
-```bash
 mjpython view_gait.py --gait run
-```
-
-## Open the ground-stiffness CSV in Microsoft Excel (macOS)
-
-```bash
+Close the MuJoCo viewer to return to the terminal. A viewer run is separate from the ground-stiffness sweep.
+Open the summary in Excel
+On macOS, open the saved sweep summary with:
 open -a "Microsoft Excel" "results/ground_stiffness/ground_stiffness_summary.csv"
-```
